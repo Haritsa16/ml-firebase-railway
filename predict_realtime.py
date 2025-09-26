@@ -1,0 +1,92 @@
+import firebase_admin
+from firebase_admin import credentials, db
+import pandas as pd
+import joblib
+from collections import deque
+import time
+
+# ==========================
+# 1. Load model & scaler
+# ==========================
+model = joblib.load("model_knn_4h_ahead.pkl")
+scaler_X = joblib.load("scaler_X.pkl")
+scaler_y = joblib.load("scaler_y.pkl")
+
+# ==========================
+# 2. Setup Firebase
+# ==========================
+cred = credentials.Certificate("firebase_config.json")
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://coba-esp-3-default-rtdb.asia-southeast1.firebasedatabase.app/'
+})
+
+# ==========================
+# 3. Setup history buffers (lag features)
+# ==========================
+dc_power_history = deque([0, 0, 0], maxlen=3)
+irradiance_history = deque([0], maxlen=1)
+module_temp_history = deque([0], maxlen=1)
+
+# ==========================
+# 4. Realtime loop
+# ==========================
+while True:
+    try:
+        ref = db.reference("devices/esp32_1/sensor")
+        data = ref.get()
+
+        if data is None:
+            print("Data kosong, tunggu...")
+            time.sleep(5)
+            continue
+
+        # ==========================
+        # 5. Mapping Firebase -> model feature
+        # ==========================
+        data_mapped = {
+            'AMBIENT_TEMPERATURE': data['temp_dht'],
+            'MODULE_TEMPERATURE': data['temp_ds18'],
+            'IRRADIATION': data['irradiance'],
+            'DC_POWER_t-1': dc_power_history[-1],
+            'DC_POWER_t-2': dc_power_history[-2],
+            'DC_POWER_t-3': dc_power_history[-3],
+            'IRRADIATION_t-1': irradiance_history[-1],
+            'MODULE_TEMPERATURE_t-1': module_temp_history[-1]
+        }
+
+        data_baru = pd.DataFrame([data_mapped])
+
+        # ==========================
+        # 6. Scaling & prediksi
+        # ==========================
+        data_scaled = scaler_X.transform(data_baru)
+        y_pred_scaled = model.predict(data_scaled).reshape(-1, 1)
+        y_pred = scaler_y.inverse_transform(y_pred_scaled)
+
+        hasil_prediksi = float(y_pred[0][0])
+
+        print("Data realtime:", data)
+        print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
+
+        # ==========================
+        # 7. Simpan hasil prediksi ke Firebase (overwrite prediksi saja)
+        # ==========================
+        pred_ref = db.reference("devices/esp32_1/prediksi")
+        pred_ref.set({
+        "dc_power_predicted": hasil_prediksi,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+
+        # ==========================
+        # 8. Update history buffers
+        # ==========================
+        dc_power_history.append(data.get('dc_power', 0))  
+        irradiance_history.append(data['irradiance'])
+        module_temp_history.append(data['temp_ds18'])
+
+        time.sleep(5)
+
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(5)
