@@ -4,6 +4,7 @@ import pandas as pd
 import joblib
 from collections import deque
 import time
+import os, json  # Tambahan untuk baca env
 
 # ==========================
 # 1. Load model & scaler
@@ -13,9 +14,11 @@ scaler_X = joblib.load("scaler_X.pkl")
 scaler_y = joblib.load("scaler_y.pkl")
 
 # ==========================
-# 2. Setup Firebase
+# 2. Setup Firebase dari Environment Variable
 # ==========================
-cred = credentials.Certificate("firebase_config.json")
+firebase_config = json.loads(os.environ["FIREBASE_CREDENTIALS"])  # Ambil dari Railway
+cred = credentials.Certificate(firebase_config)
+
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://coba-esp-3-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
@@ -69,19 +72,18 @@ while True:
         print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
 
         # ==========================
-        # 7. Simpan hasil prediksi ke Firebase (overwrite prediksi saja)
+        # 7. Simpan hasil prediksi ke Firebase
         # ==========================
         pred_ref = db.reference("devices/esp32_1/prediksi")
         pred_ref.set({
-        "dc_power_predicted": hasil_prediksi,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "dc_power_predicted": hasil_prediksi,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         })
-
 
         # ==========================
         # 8. Update history buffers
         # ==========================
-        dc_power_history.append(data.get('dc_power', 0))  
+        dc_power_history.append(data.get('dc_power', 0))
         irradiance_history.append(data['irradiance'])
         module_temp_history.append(data['temp_ds18'])
 
