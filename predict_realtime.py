@@ -38,7 +38,7 @@ while True:
         ref = db.reference("devices/esp32_1/sensor")
         data = ref.get()
 
-        if data is None:
+        if not data:
             print("Data kosong, tunggu...")
             time.sleep(5)
             continue
@@ -47,9 +47,9 @@ while True:
         # 5. Mapping Firebase -> model feature
         # ==========================
         data_mapped = {
-            'AMBIENT_TEMPERATURE': data['temp_dht'],
-            'MODULE_TEMPERATURE': data['temp_ds18'],
-            'IRRADIATION': data['irradiance'],
+            'AMBIENT_TEMPERATURE': data.get('temp_dht', 0),
+            'MODULE_TEMPERATURE': data.get('temp_ds18', 0),
+            'IRRADIATION': data.get('irradiance', 0),
             'DC_POWER_t-1': dc_power_history[-1],
             'DC_POWER_t-2': dc_power_history[-2],
             'DC_POWER_t-3': dc_power_history[-3],
@@ -72,7 +72,7 @@ while True:
         print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
 
         # ==========================
-        # 7. Simpan hasil prediksi ke Firebase
+        # 7a. Simpan hasil prediksi ke devices/esp32_1/prediksi
         # ==========================
         pred_ref = db.reference("devices/esp32_1/prediksi")
         pred_ref.set({
@@ -81,11 +81,35 @@ while True:
         })
 
         # ==========================
+        # 7b. Update field prediksi di devices/esp32_1/sensor
+        # ==========================
+        sensor_ref = db.reference("devices/esp32_1/sensor")
+        sensor_ref.update({
+            "prediksi": hasil_prediksi
+        })
+
+        # ==========================
+        # 7c. Simpan ke sensorLog/{tanggal}/{jam}
+        # ==========================
+        tanggal = time.strftime("%Y-%m-%d")
+        jam = time.strftime("%I:%M:%S %p")  # contoh: 02:45:39 PM
+
+        log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}/{jam}")
+        log_ref.set({
+            "humidity": data.get("humidity", 0),
+            "irradiance": data.get("irradiance", 0),
+            "lux": data.get("lux", 0),
+            "temp_dht": data.get("temp_dht", 0),
+            "temp_ds18": data.get("temp_ds18", 0),
+            "prediksi": hasil_prediksi
+        })
+
+        # ==========================
         # 8. Update history buffers
         # ==========================
         dc_power_history.append(data.get('dc_power', 0))
-        irradiance_history.append(data['irradiance'])
-        module_temp_history.append(data['temp_ds18'])
+        irradiance_history.append(data.get('irradiance', 0))
+        module_temp_history.append(data.get('temp_ds18', 0))
 
         time.sleep(5)
 
