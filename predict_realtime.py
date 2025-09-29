@@ -27,8 +27,8 @@ firebase_admin.initialize_app(cred, {
 # 3. Setup history buffers (lag features)
 # ==========================
 dc_power_history = deque([0, 0, 0], maxlen=3)
-irradiance_history = deque([0], maxlen=1)
-module_temp_history = deque([0], maxlen=1)
+irradiance_history = deque([0, 0, 0], maxlen=3)
+module_temp_history = deque([0, 0, 0], maxlen=3)
 
 # ==========================
 # 4. Realtime loop
@@ -57,6 +57,10 @@ while True:
             'MODULE_TEMPERATURE_t-1': module_temp_history[-1]
         }
 
+        # Debug input ke model
+        print("Data realtime:", data)
+        print("Fitur untuk model:", data_mapped)
+
         data_baru = pd.DataFrame([data_mapped])
 
         # ==========================
@@ -68,7 +72,6 @@ while True:
 
         hasil_prediksi = float(y_pred[0][0])
 
-        print("Data realtime:", data)
         print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
 
         # ==========================
