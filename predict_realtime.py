@@ -95,7 +95,7 @@ while True:
         # 7c. Simpan ke sensorLog/{tanggal}/{jam}
         # ==========================
         tanggal = time.strftime("%Y-%m-%d")
-        jam = time.strftime("%I:%M:%S %p")  # contoh: 02:45:39 PM
+        jam = time.strftime("%H:%M:%S")  # contoh: 16:53:46
 
         log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}/{jam}")
         log_ref.update({
