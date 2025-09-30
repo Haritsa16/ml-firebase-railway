@@ -98,12 +98,7 @@ while True:
         jam = time.strftime("%I:%M:%S %p")  # contoh: 02:45:39 PM
 
         log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}/{jam}")
-        log_ref.set({
-            "humidity": data.get("humidity", 0),
-            "irradiance": data.get("irradiance", 0),
-            "lux": data.get("lux", 0),
-            "temp_dht": data.get("temp_dht", 0),
-            "temp_ds18": data.get("temp_ds18", 0),
+        log_ref.update({
             "prediksi": hasil_prediksi
         })
 
