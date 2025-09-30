@@ -74,29 +74,27 @@ while True:
 
         print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
 
-        # ==========================
-        # 7a. Simpan hasil prediksi ke devices/esp32_1/prediksi
-        # ==========================
+        # --------------------------
+        # Simpan hasil prediksi
+        # --------------------------
+        tanggal = time.strftime("%Y-%m-%d")
+        jam = time.strftime("%H:%M:%S")
+
+        # 7a. Simpan ke devices/esp32_1/prediksi (realtime prediksi)
         pred_ref = db.reference("devices/esp32_1/prediksi")
         pred_ref.set({
             "dc_power_predicted": hasil_prediksi,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "tanggal": tanggal,
+            "jam": jam
         })
 
-        # ==========================
         # 7b. Update field prediksi di devices/esp32_1/sensor
-        # ==========================
         sensor_ref = db.reference("devices/esp32_1/sensor")
         sensor_ref.update({
             "prediksi": hasil_prediksi
         })
 
-        # ==========================
-        # 7c. Update prediksi ke log terakhir dari ESP
-        # ==========================
-        tanggal = time.strftime("%Y-%m-%d")
-
-        # ambil node terakhir dari log ESP hari ini
+        # 7c. Update prediksi ke log terakhir dari ESP (format sama dengan ESP)
         log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
         last_logs = log_ref.order_by_key().limit_to_last(1).get()
 
