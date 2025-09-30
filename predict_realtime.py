@@ -20,7 +20,7 @@ firebase_config = json.loads(os.environ["FIREBASE_CREDENTIALS"])  # Ambil dari R
 cred = credentials.Certificate(firebase_config)
 
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://coba-esp-3-default-rtdb.asia-southeast1.firebasedatabase.app/'
+    'databaseURL': 'https://coba-esp-4-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 
 # ==========================
