@@ -97,10 +97,17 @@ while True:
         tanggal = time.strftime("%Y-%m-%d")
         jam = time.strftime("%H:%M:%S")  # contoh: 16:53:46
 
-        log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}/{jam}")
-        log_ref.update({
-            "prediksi": hasil_prediksi
-        })
+        # ambil node terakhir dari log
+        log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
+        last_logs = log_ref.order_by_key().limit_to_last(1).get()
+
+        if last_logs:
+            last_time = list(last_logs.keys())[0]  # contoh: "10:33:10"
+            # update prediksi di jam terakhir
+            log_ref.child(last_time).update({
+                "prediksi": hasil_prediksi
+            })
+
 
         # ==========================
         # 8. Update history buffers
