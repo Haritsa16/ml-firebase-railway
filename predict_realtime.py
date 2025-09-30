@@ -92,21 +92,22 @@ while True:
         })
 
         # ==========================
-        # 7c. Simpan ke sensorLog/{tanggal}/{jam}
+        # 7c. Update prediksi ke log terakhir dari ESP
         # ==========================
         tanggal = time.strftime("%Y-%m-%d")
-        jam = time.strftime("%H:%M:%S")  # contoh: 16:53:46
 
-        # ambil node terakhir dari log
+        # ambil node terakhir dari log ESP hari ini
         log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
         last_logs = log_ref.order_by_key().limit_to_last(1).get()
 
         if last_logs:
-            last_time = list(last_logs.keys())[0]  # contoh: "10:33:10"
-            # update prediksi di jam terakhir
+            last_time = list(last_logs.keys())[0]  # contoh: "17:42:44"
             log_ref.child(last_time).update({
                 "prediksi": hasil_prediksi
             })
+            print(f"Prediksi ditambahkan ke {tanggal}/{last_time}")
+        else:
+            print("Belum ada log sensor dari ESP hari ini.")
 
 
         # ==========================
