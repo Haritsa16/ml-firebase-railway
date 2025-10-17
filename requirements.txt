@@ -4,3 +4,5 @@ scikit-learn
 numpy
 pandas
 firebase_admin
+pyrebase4
+
