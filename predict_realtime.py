@@ -1,10 +1,8 @@
-import firebase_admin
-from firebase_admin import credentials, db
+import pyrebase
 import pandas as pd
 import joblib
 from collections import deque
 import time
-import os, json  # Tambahan untuk baca env
 
 # ==========================
 # 1. Load model & scaler
@@ -14,17 +12,24 @@ scaler_X = joblib.load("scaler_X.pkl")
 scaler_y = joblib.load("scaler_y.pkl")
 
 # ==========================
-# 2. Setup Firebase dari Environment Variable
+# 2. Firebase Config (pakai Pyrebase, bukan firebase_admin)
 # ==========================
-firebase_config = json.loads(os.environ["FIREBASE_CREDENTIALS"])  # Ambil dari Railway
-cred = credentials.Certificate(firebase_config)
+firebase_config = {
+  "apiKey": "AIzaSyBFjzL-7TSHCdEp24-9N1taB7g5QrfzGNo",
+  "authDomain": "coba-esp-4.firebaseapp.com",
+  "databaseURL": "https://coba-esp-4-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "projectId": "coba-esp-4",
+  "storageBucket": "coba-esp-4.firebasestorage.app",
+  "messagingSenderId": "823614837927",
+  "appId": "1:823614837927:web:1d14d80a806c8ad7697782",
+  "measurementId": "G-R9VDE2FNGY"
+};
 
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://coba-esp-4-default-rtdb.asia-southeast1.firebasedatabase.app/'
-})
+firebase = pyrebase.initialize_app(firebase_config)
+db = firebase.database()
 
 # ==========================
-# 3. Setup history buffers (lag features)
+# 3. Setup history buffers
 # ==========================
 dc_power_history = deque([0, 0, 0], maxlen=3)
 irradiance_history = deque([0, 0, 0], maxlen=3)
@@ -35,17 +40,14 @@ module_temp_history = deque([0, 0, 0], maxlen=3)
 # ==========================
 while True:
     try:
-        ref = db.reference("devices/esp32_1/sensor")
-        data = ref.get()
+        data = db.child("devices/esp32_1/sensor").get().val()
 
         if not data:
             print("Data kosong, tunggu...")
             time.sleep(5)
             continue
 
-        # ==========================
-        # 5. Mapping Firebase -> model feature
-        # ==========================
+        # 5. Mapping data ke fitur model
         data_mapped = {
             'AMBIENT_TEMPERATURE': data.get('temp_dht', 0),
             'MODULE_TEMPERATURE': data.get('temp_ds18', 0),
@@ -57,60 +59,45 @@ while True:
             'MODULE_TEMPERATURE_t-1': module_temp_history[-1]
         }
 
-        # Debug input ke model
         print("Data realtime:", data)
         print("Fitur untuk model:", data_mapped)
 
         data_baru = pd.DataFrame([data_mapped])
 
-        # ==========================
         # 6. Scaling & prediksi
-        # ==========================
         data_scaled = scaler_X.transform(data_baru)
         y_pred_scaled = model.predict(data_scaled).reshape(-1, 1)
         y_pred = scaler_y.inverse_transform(y_pred_scaled)
-
-        hasil_prediksi = float(y_pred[0][0])
+        hasil_prediksi = float(y_pred[0][0])/10
 
         print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
 
-        # --------------------------
-        # Simpan hasil prediksi
-        # --------------------------
+        # 7. Simpan hasil prediksi ke Firebase
         tanggal = time.strftime("%Y-%m-%d")
         jam = time.strftime("%H:%M:%S")
 
-        # 7a. Simpan ke devices/esp32_1/prediksi (realtime prediksi)
-        pred_ref = db.reference("devices/esp32_1/prediksi")
-        pred_ref.set({
+        db.child("devices/esp32_1/prediksi").set({
             "dc_power_predicted": hasil_prediksi,
             "tanggal": tanggal,
             "jam": jam
         })
 
-        # 7b. Update field prediksi di devices/esp32_1/sensor
-        sensor_ref = db.reference("devices/esp32_1/sensor")
-        sensor_ref.update({
+        db.child("devices/esp32_1/sensor").update({
             "prediksi": hasil_prediksi
         })
 
-        # 7c. Update prediksi ke log terakhir dari ESP (format sama dengan ESP)
-        log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
-        last_logs = log_ref.order_by_key().limit_to_last(1).get()
-
-        if last_logs:
-            last_time = list(last_logs.keys())[0]  # contoh: "17:42:44"
-            log_ref.child(last_time).update({
+        # Update ke log terakhir (kalau ada)
+        logs = db.child(f"devices/esp32_1/sensorLog/{tanggal}").get().val()
+        if logs:
+            last_time = list(logs.keys())[-1]
+            db.child(f"devices/esp32_1/sensorLog/{tanggal}/{last_time}").update({
                 "prediksi": hasil_prediksi
             })
             print(f"Prediksi ditambahkan ke {tanggal}/{last_time}")
         else:
             print("Belum ada log sensor dari ESP hari ini.")
 
-
-        # ==========================
-        # 8. Update history buffers
-        # ==========================
+        # 8. Update history
         dc_power_history.append(data.get('dc_power', 0))
         irradiance_history.append(data.get('irradiance', 0))
         module_temp_history.append(data.get('temp_ds18', 0))
