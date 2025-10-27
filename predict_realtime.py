@@ -4,7 +4,7 @@ import pandas as pd
 import joblib
 from collections import deque
 import time
-import os, json  # Tambahan untuk baca env
+import os, json
 
 # ==========================
 # 1. Load model & scaler
@@ -14,24 +14,31 @@ scaler_X = joblib.load("scaler_X.pkl")
 scaler_y = joblib.load("scaler_y.pkl")
 
 # ==========================
-# 2. Setup Firebase dari Environment Variable
+# 2. Setup Firebase
 # ==========================
-firebase_config = json.loads(os.environ["FIREBASE_CREDENTIALS"])  # Ambil dari Railway
-cred = credentials.Certificate(firebase_config)
+firebase_json = os.environ.get("FIREBASE_CREDENTIALS", None)
+if not firebase_json:
+    raise RuntimeError("❌ FIREBASE_CREDENTIALS tidak ditemukan di environment!")
 
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://coba-esp-4-default-rtdb.asia-southeast1.firebasedatabase.app/'
-})
+try:
+    firebase_config = json.loads(firebase_json)
+    cred = credentials.Certificate(firebase_config)
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://coba-esp-4-default-rtdb.asia-southeast1.firebasedatabase.app/'
+    })
+    print("✅ Firebase terhubung!")
+except Exception as e:
+    raise RuntimeError(f"❌ Gagal inisialisasi Firebase: {e}")
 
 # ==========================
-# 3. Setup history buffers (lag features)
+# 3. History buffers
 # ==========================
 dc_power_history = deque([0, 0, 0], maxlen=3)
 irradiance_history = deque([0, 0, 0], maxlen=3)
 module_temp_history = deque([0, 0, 0], maxlen=3)
 
 # ==========================
-# 4. Realtime loop
+# 4. Loop realtime
 # ==========================
 while True:
     try:
@@ -39,12 +46,14 @@ while True:
         data = ref.get()
 
         if not data:
-            print("Data kosong, tunggu...")
+            print("⚠️ Data kosong, tunggu 5 detik...")
             time.sleep(5)
             continue
 
+        print("\n🔥 Data realtime:", data)
+
         # ==========================
-        # 5. Mapping Firebase -> model feature
+        # 5. Mapping data
         # ==========================
         data_mapped = {
             'AMBIENT_TEMPERATURE': data.get('temp_dht', 0),
@@ -57,59 +66,69 @@ while True:
             'MODULE_TEMPERATURE_t-1': module_temp_history[-1]
         }
 
-        # Debug input ke model
-        print("Data realtime:", data)
-        print("Fitur untuk model:", data_mapped)
-
-        data_baru = pd.DataFrame([data_mapped])
+        print("🧠 Fitur ke model:", data_mapped)
 
         # ==========================
         # 6. Scaling & prediksi
         # ==========================
-        data_scaled = scaler_X.transform(data_baru)
+        df = pd.DataFrame([data_mapped])
+        data_scaled = scaler_X.transform(df)
         y_pred_scaled = model.predict(data_scaled).reshape(-1, 1)
         y_pred = scaler_y.inverse_transform(y_pred_scaled)
-
         hasil_prediksi = float(y_pred[0][0])
 
-        print("Prediksi DC_POWER 4 jam ke depan:", hasil_prediksi)
+        print(f"✅ Prediksi DC_POWER 4 jam ke depan: {hasil_prediksi:.2f}")
 
-        # --------------------------
-        # Simpan hasil prediksi
-        # --------------------------
+        # ==========================
+        # 7. Simpan hasil prediksi
+        # ==========================
         tanggal = time.strftime("%Y-%m-%d")
         jam = time.strftime("%H:%M:%S")
 
-        # 7a. Simpan ke devices/esp32_1/prediksi (realtime prediksi)
-        pred_ref = db.reference("devices/esp32_1/prediksi")
-        pred_ref.set({
-            "dc_power_predicted": hasil_prediksi,
-            "tanggal": tanggal,
-            "jam": jam
-        })
-
-        # 7b. Update field prediksi di devices/esp32_1/sensor
-        sensor_ref = db.reference("devices/esp32_1/sensor")
-        sensor_ref.update({
-            "prediksi": hasil_prediksi
-        })
-
-        # 7c. Update prediksi ke log terakhir dari ESP (format sama dengan ESP)
-        log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
-        last_logs = log_ref.order_by_key().limit_to_last(1).get()
-
-        if last_logs:
-            last_time = list(last_logs.keys())[0]  # contoh: "17:42:44"
-            log_ref.child(last_time).update({
-                "prediksi": hasil_prediksi
+        # --- a. Simpan realtime prediksi
+        try:
+            pred_ref = db.reference("devices/esp32_1/prediksi")
+            pred_ref.set({
+                "dc_power_predicted": hasil_prediksi,
+                "tanggal": tanggal,
+                "jam": jam
             })
-            print(f"Prediksi ditambahkan ke {tanggal}/{last_time}")
-        else:
-            print("Belum ada log sensor dari ESP hari ini.")
+            print("📡 Prediksi disimpan ke devices/esp32_1/prediksi ✅")
+        except Exception as e:
+            print("❌ Gagal menyimpan ke prediksi:", e)
 
+        # --- b. Update field di sensor utama
+        try:
+            sensor_ref = db.reference("devices/esp32_1/sensor")
+            sensor_ref.update({"prediksi": hasil_prediksi})
+            print("📡 Field 'prediksi' di sensor diperbarui ✅")
+        except Exception as e:
+            print("❌ Gagal update field di sensor:", e)
+
+        # --- c. Update di log terakhir (sensorLog)
+        try:
+            log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
+            last_logs = log_ref.order_by_key().limit_to_last(1).get()
+
+            if last_logs and isinstance(last_logs, dict):
+                last_time = list(last_logs.keys())[0]
+                # Normalisasi format jam (hindari "1:08:40 PM")
+                try:
+                    if "M" in last_time:
+                        parsed_time = time.strptime(last_time, "%I:%M:%S %p")
+                        last_time = time.strftime("%H:%M:%S", parsed_time)
+                except:
+                    pass
+
+                log_ref.child(last_time).update({"prediksi": hasil_prediksi})
+                print(f"📡 Prediksi ditambahkan ke {tanggal}/{last_time} ✅")
+            else:
+                print("⚠️ Tidak ada log valid untuk hari ini.")
+        except Exception as e:
+            print("❌ Gagal update ke log terakhir:", e)
 
         # ==========================
-        # 8. Update history buffers
+        # 8. Update history
         # ==========================
         dc_power_history.append(data.get('dc_power', 0))
         irradiance_history.append(data.get('irradiance', 0))
@@ -118,5 +137,5 @@ while True:
         time.sleep(5)
 
     except Exception as e:
-        print("Error:", e)
+        print("🔥 Error utama:", e)
         time.sleep(5)
