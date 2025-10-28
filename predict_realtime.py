@@ -42,6 +42,8 @@ module_temp_history = deque([0, 0, 0], maxlen=3)
 # ==========================
 last_time_seen = None  # Simpan waktu log terakhir yang sudah diproses
 
+print("\n🚀 Memulai loop prediksi realtime...\n")
+
 while True:
     try:
         tanggal = time.strftime("%Y-%m-%d")
@@ -55,6 +57,7 @@ while True:
 
         last_time = list(last_entry.keys())[0]
 
+        # Lewati jika log belum berubah
         if last_time == last_time_seen:
             print("⏳ Tidak ada data log baru. Tunggu 10 detik...")
             time.sleep(10)
@@ -63,15 +66,24 @@ while True:
         data = last_entry[last_time]
         last_time_seen = last_time
 
-        print(f"\n🔥 Data log terbaru ({last_time}):", data)
+        print(f"\n🔥 Data log terbaru ({tanggal} {last_time}):", data)
 
         # ==========================
-        # 5. Mapping data ke fitur model
+        # 5. Skip prediksi jika data belum berubah signifikan
+        # ==========================
+        if (float(data.get('irradiance', 0)) == irradiance_history[-1] and
+            float(data.get('temp_ds18', 0)) == module_temp_history[-1]):
+            print("⏳ Data belum berubah secara signifikan, skip prediksi kali ini.")
+            time.sleep(10)
+            continue
+
+        # ==========================
+        # 6. Mapping data ke fitur model
         # ==========================
         data_mapped = {
-            'AMBIENT_TEMPERATURE': data.get('temp_dht', 0),
-            'MODULE_TEMPERATURE': data.get('temp_ds18', 0),
-            'IRRADIATION': data.get('irradiance', 0),
+            'AMBIENT_TEMPERATURE': float(data.get('temp_dht', 0)),
+            'MODULE_TEMPERATURE': float(data.get('temp_ds18', 0)),
+            'IRRADIATION': float(data.get('irradiance', 0)),
             'DC_POWER_t-1': dc_power_history[-1],
             'DC_POWER_t-2': dc_power_history[-2],
             'DC_POWER_t-3': dc_power_history[-3],
@@ -79,10 +91,11 @@ while True:
             'MODULE_TEMPERATURE_t-1': module_temp_history[-1]
         }
 
-        print("🧠 Fitur ke model:", data_mapped)
+        print("🧠 Fitur ke model:")
+        print(pd.DataFrame([data_mapped]).to_string(index=False))
 
         # ==========================
-        # 6. Scaling & prediksi
+        # 7. Scaling & prediksi
         # ==========================
         df = pd.DataFrame([data_mapped])
         data_scaled = scaler_X.transform(df)
@@ -93,7 +106,7 @@ while True:
         print(f"✅ Prediksi DC_POWER 4 jam ke depan: {hasil_prediksi:.2f}")
 
         # ==========================
-        # 7. Simpan hasil prediksi
+        # 8. Simpan hasil prediksi ke Firebase
         # ==========================
         jam = time.strftime("%H:%M:%S")
 
@@ -126,13 +139,22 @@ while True:
             print("❌ Gagal update log terakhir:", e)
 
         # ==========================
-        # 8. Update history
+        # 9. Update history agar input model dinamis
         # ==========================
-        dc_power_history.append(data.get('dc_power', 0))
-        irradiance_history.append(data.get('irradiance', 0))
-        module_temp_history.append(data.get('temp_ds18', 0))
+        irradiance_history.append(float(data.get('irradiance', 0)))
+        module_temp_history.append(float(data.get('temp_ds18', 0)))
 
-        # Delay agar tidak terlalu sering baca Firebase
+        # Karena ESP32 tidak kirim dc_power, pakai hasil prediksi sebelumnya
+        dc_power_history.append(float(hasil_prediksi))
+
+        print("📊 History updated:")
+        print("  dc_power_history:", list(dc_power_history))
+        print("  irradiance_history:", list(irradiance_history))
+        print("  module_temp_history:", list(module_temp_history))
+
+        # ==========================
+        # 10. Delay antar loop
+        # ==========================
         time.sleep(10)
 
     except Exception as e:
