@@ -40,20 +40,33 @@ module_temp_history = deque([0, 0, 0], maxlen=3)
 # ==========================
 # 4. Loop realtime
 # ==========================
+last_time_seen = None  # Simpan waktu log terakhir yang sudah diproses
+
 while True:
     try:
-        ref = db.reference("devices/esp32_1/sensor")
-        data = ref.get()
+        tanggal = time.strftime("%Y-%m-%d")
+        today_log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
+        last_entry = today_log_ref.order_by_key().limit_to_last(1).get()
 
-        if not data:
-            print("⚠️ Data kosong, tunggu 5 detik...")
-            time.sleep(5)
+        if not last_entry:
+            print("⚠️ Belum ada log untuk hari ini. Tunggu 10 detik...")
+            time.sleep(10)
             continue
 
-        print("\n🔥 Data realtime:", data)
+        last_time = list(last_entry.keys())[0]
+
+        if last_time == last_time_seen:
+            print("⏳ Tidak ada data log baru. Tunggu 10 detik...")
+            time.sleep(10)
+            continue
+
+        data = last_entry[last_time]
+        last_time_seen = last_time
+
+        print(f"\n🔥 Data log terbaru ({last_time}):", data)
 
         # ==========================
-        # 5. Mapping data
+        # 5. Mapping data ke fitur model
         # ==========================
         data_mapped = {
             'AMBIENT_TEMPERATURE': data.get('temp_dht', 0),
@@ -82,7 +95,6 @@ while True:
         # ==========================
         # 7. Simpan hasil prediksi
         # ==========================
-        tanggal = time.strftime("%Y-%m-%d")
         jam = time.strftime("%H:%M:%S")
 
         # --- a. Simpan realtime prediksi
@@ -105,27 +117,13 @@ while True:
         except Exception as e:
             print("❌ Gagal update field di sensor:", e)
 
-        # --- c. Update di log terakhir (sensorLog)
+        # --- c. Tambahkan prediksi ke log terakhir
         try:
-            log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}")
-            last_logs = log_ref.order_by_key().limit_to_last(1).get()
-
-            if last_logs and isinstance(last_logs, dict):
-                last_time = list(last_logs.keys())[0]
-                # Normalisasi format jam (hindari "1:08:40 PM")
-                try:
-                    if "M" in last_time:
-                        parsed_time = time.strptime(last_time, "%I:%M:%S %p")
-                        last_time = time.strftime("%H:%M:%S", parsed_time)
-                except:
-                    pass
-
-                log_ref.child(last_time).update({"prediksi": hasil_prediksi})
-                print(f"📡 Prediksi ditambahkan ke {tanggal}/{last_time} ✅")
-            else:
-                print("⚠️ Tidak ada log valid untuk hari ini.")
+            log_ref = db.reference(f"devices/esp32_1/sensorLog/{tanggal}/{last_time}")
+            log_ref.update({"prediksi": hasil_prediksi})
+            print(f"📡 Prediksi ditambahkan ke log {tanggal}/{last_time} ✅")
         except Exception as e:
-            print("❌ Gagal update ke log terakhir:", e)
+            print("❌ Gagal update log terakhir:", e)
 
         # ==========================
         # 8. Update history
@@ -134,8 +132,9 @@ while True:
         irradiance_history.append(data.get('irradiance', 0))
         module_temp_history.append(data.get('temp_ds18', 0))
 
-        time.sleep(5)
+        # Delay agar tidak terlalu sering baca Firebase
+        time.sleep(10)
 
     except Exception as e:
         print("🔥 Error utama:", e)
-        time.sleep(5)
+        time.sleep(10)
